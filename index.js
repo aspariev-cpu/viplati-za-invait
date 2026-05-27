@@ -5,6 +5,7 @@ dotenv.config({ override: true });
 const { Client, GatewayIntentBits, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const db = require('./database');
 
+// Читаем настройки из .env
 const config = {
   CHANNEL_ID: process.env.CHANNEL_ID,
   HIGH_ROLE_ID: process.env.HIGH_ROLE_ID,
@@ -15,6 +16,7 @@ const config = {
   PREFIX: process.env.PREFIX || '!',
 };
 
+// Проверка обязательных настроек
 if (!config.CHANNEL_ID || !config.HIGH_ROLE_ID || !config.MAIN_ROLE_ID || !config.COMMANDS_CHANNEL_ID || !config.ADMIN_ROLE_ID) {
   console.error('❌ Ошибка: В .env не указаны обязательные ID');
   process.exit(1);
@@ -153,7 +155,7 @@ client.on(Events.MessageCreate, async (message) => {
   }
 });
 
-// НОВЫЙ УЧАСТНИК - С ДИАГНОСТИКОЙ
+// НОВЫЙ УЧАСТНИК
 client.on(Events.GuildMemberAdd, async (member) => {
   console.log(`🔔 Событие GuildMemberAdd: ${member.user.tag} (${member.id})`);
   
@@ -176,7 +178,6 @@ client.on(Events.GuildMemberAdd, async (member) => {
       console.log(`✅ ЛС успешно отправлено для ${member.user.tag}`);
     } catch (err) {
       console.log(`❌ Ошибка отправки ЛС для ${member.user.tag}: ${err.message}`);
-      console.log(`   Возможно, у пользователя закрыты ЛС.`);
     }
   } else {
     console.log(`👋 ${member.user.tag} уже был на сервере, ЛС не отправлено`);
@@ -311,15 +312,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isModalSubmit()) return;
   
-  const targetInput = interaction.fields.getTextInputValue('target_user');
-  const targetId = targetInput.replace(/[<@!>]/g, '').trim();
-  
-  if (!/^\d+$/.test(targetId)) {
-    return interaction.reply({ content: '❌ Неверный формат. Введите Discord ID (только цифры).', ephemeral: true });
-  }
-  
   if (interaction.customId === 'who_invited_modal') {
     await interaction.deferReply({ ephemeral: true });
+    const targetId = interaction.fields.getTextInputValue('target_user').replace(/[<@!>]/g, '').trim();
+    
+    if (!/^\d+$/.test(targetId)) {
+      return interaction.editReply({ content: '❌ Неверный формат. Введите Discord ID (только цифры).' });
+    }
     
     const referral = await db.getReferral(targetId);
     if (!referral) {
@@ -332,6 +331,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
   
   if (interaction.customId === 'repeat_request_modal') {
     await interaction.deferReply({ ephemeral: true });
+    const targetId = interaction.fields.getTextInputValue('target_user').replace(/[<@!>]/g, '').trim();
+    
+    if (!/^\d+$/.test(targetId)) {
+      return interaction.editReply({ content: '❌ Неверный формат. Введите Discord ID (только цифры).' });
+    }
     
     const referral = await db.getReferral(targetId);
     if (!referral || referral.status !== 'pending') {
@@ -353,15 +357,50 @@ client.on(Events.InteractionCreate, async (interaction) => {
   
   if (interaction.customId === 'reset_user_modal') {
     await interaction.deferReply({ ephemeral: true });
+    const targetId = interaction.fields.getTextInputValue('target_user').replace(/[<@!>]/g, '').trim();
+    
+    if (!/^\d+$/.test(targetId)) {
+      return interaction.editReply({ content: '❌ Неверный формат. Введите Discord ID (только цифры).' });
+    }
     
     const referral = await db.getReferral(targetId);
     if (!referral) {
       return interaction.editReply({ content: `❌ Нет приглашения для <@${targetId}> в базе данных.` });
     }
     
+    const inviterId = referral.inviter_id;
+    
     await db.deleteReferral(targetId);
-    await interaction.editReply({ content: `✅ Приглашение для <@${targetId}> удалено из базы данных.` });
-    console.log(`🗑️ Сброшен участник ${targetId} админом ${interaction.user.tag}`);
+    await db.resetUserInviteFlag(targetId);
+    
+    const guild = client.guilds.cache.first();
+    let targetMember;
+    try {
+      targetMember = await guild.members.fetch(targetId);
+    } catch (err) {
+      console.log(`❌ Не удалось найти пользователя ${targetId} на сервере`);
+    }
+    
+    if (targetMember) {
+      try {
+        await targetMember.send(`🔄 **Ваше приглашение было сброшено администратором!**
+        
+Если тебя кто-то пригласил — напиши сюда **Discord ID** пригласившего.
+
+**Как получить Discord ID:**
+1. Включи в Discord "Режим разработчика" (Настройки → Дополнительно → Режим разработчика)
+2. Нажми ПКМ на имени пригласившего → "Копировать ID"
+3. Вставь этот ID в ответ на это сообщение
+
+Если тебя никто не приглашал — просто проигнорируй это сообщение.`);
+        console.log(`📨 Отправлено ЛС для ${targetMember.user.tag} о сбросе приглашения`);
+      } catch (err) {
+        console.log(`❌ Не удалось отправить ЛС ${targetMember.user.tag}: ${err.message}`);
+      }
+    }
+    
+    await interaction.editReply({ content: `✅ Приглашение для <@${targetId}> удалено из базы данных.\n📨 Пользователю отправлено ЛС с предложением заново указать пригласившего.\n\nПриглашавший: <@${inviterId}>` });
+    console.log(`🗑️ Сброшен участник ${targetId} админом ${interaction.user.tag}. Приглашал: ${inviterId}`);
   }
 });
 

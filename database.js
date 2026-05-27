@@ -1,5 +1,5 @@
 // database.js
-const sqlite3 = require('sqlite3');
+const sqlite3 = require('sqlite3').verbose();
 const { open } = require('sqlite');
 const path = require('path');
 
@@ -11,7 +11,6 @@ async function initDB() {
     driver: sqlite3.Database
   });
 
-  // Таблица пользователей (все, кто когда-либо заходил)
   await db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       discord_id TEXT PRIMARY KEY,
@@ -20,16 +19,13 @@ async function initDB() {
     )
   `);
 
-  // Таблица приглашений
   await db.exec(`
     CREATE TABLE IF NOT EXISTS referrals (
       invited_id TEXT PRIMARY KEY,
       inviter_id TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'pending',
       created_at INTEGER NOT NULL,
-      completed_at INTEGER,
-      FOREIGN KEY (invited_id) REFERENCES users(discord_id),
-      FOREIGN KEY (inviter_id) REFERENCES users(discord_id)
+      completed_at INTEGER
     )
   `);
 
@@ -110,6 +106,11 @@ async function getUserStats(userId) {
   };
 }
 
+async function resetUserInviteFlag(userId) {
+  await db.run('UPDATE users SET can_invite = 1 WHERE discord_id = ?', userId);
+  console.log(`🔄 Сброшен флаг can_invite для пользователя ${userId}`);
+}
+
 module.exports = {
   initDB,
   canUserInvite,
@@ -121,5 +122,6 @@ module.exports = {
   hasSentInvite,
   deleteReferral,
   getUserStats,
+  resetUserInviteFlag,
   getDb: () => db
 };
